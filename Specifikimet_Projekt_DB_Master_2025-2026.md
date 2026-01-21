@@ -1,6 +1,3 @@
-
-
-
 Projekt në lëndën Sistemet e Bazave të të Dhënave të Avancuara
 
 Për krijimin e bazës së të dhënave duhet të përdorni SQL Server.
