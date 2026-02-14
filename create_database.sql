@@ -52,9 +52,11 @@ CREATE TABLE Users (
     LastName NVARCHAR(50) NOT NULL,
     Email NVARCHAR(100) UNIQUE NOT NULL,
     PasswordHash NVARCHAR(255) NOT NULL,
-    Role NVARCHAR(20) NOT NULL CHECK (Role IN ('client', 'professional', 'admin', 'superadmin', 'guest')),
+    Role NVARCHAR(20) NOT NULL CHECK (Role IN ('client', 'professional', 'admin')),
+    LoyaltyTier NVARCHAR(20) DEFAULT 'Bronze' CHECK (LoyaltyTier IN ('Bronze', 'Silver', 'Gold', 'Platinum')),
     IsActive BIT DEFAULT 1,
-    CreatedAt DATETIME DEFAULT GETDATE()
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    CONSTRAINT CHK_Email_Format CHECK (Email LIKE '%_@_%.__%')
 );
 GO
 
@@ -181,6 +183,19 @@ CREATE TABLE Reviews (
 );
 GO
 
+-- 11. UserLoyaltyBenefits Table (multivalue attribute - benefits per user)
+CREATE TABLE UserLoyaltyBenefits (
+    BenefitID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT NOT NULL,
+    BenefitName NVARCHAR(100) NOT NULL,
+    BenefitDescription NVARCHAR(500) NULL,
+    GrantedAt DATETIME DEFAULT GETDATE(),
+    CONSTRAINT FK_ULB_User FOREIGN KEY (UserID)
+        REFERENCES Users(UserID)
+        ON DELETE CASCADE
+);
+GO
+
 -- =============================================
 -- PART 3: Create Indexes for Performance
 -- =============================================
@@ -209,6 +224,10 @@ GO
 
 -- Reviews indexes
 CREATE NONCLUSTERED INDEX IX_Reviews_ReservationID ON Reviews(ReservationID);
+GO
+
+-- UserLoyaltyBenefits indexes
+CREATE NONCLUSTERED INDEX IX_ULB_UserID ON UserLoyaltyBenefits(UserID);
 GO
 
 -- =============================================
@@ -258,6 +277,24 @@ GROUP BY s.ServiceID, s.ServiceName, s.Description, s.BasePrice, c.CategoryName,
          u.FirstName, u.LastName, p.ExperienceYears, ps.CustomPrice;
 GO
 
+-- View 3: vw_ClientLoyaltyOverview
+CREATE VIEW vw_ClientLoyaltyOverview AS
+SELECT
+    u.UserID,
+    u.FirstName + ' ' + u.LastName AS ClientName,
+    u.LoyaltyTier,
+    COUNT(DISTINCT r.ReservationID) AS CompletedReservations,
+    (
+        SELECT STRING_AGG(ulb.BenefitName, ', ')
+        FROM UserLoyaltyBenefits ulb
+        WHERE ulb.UserID = u.UserID
+    ) AS ActiveBenefits
+FROM Users u
+LEFT JOIN Reservations r ON u.UserID = r.UserID AND r.Status = 'completed'
+WHERE u.Role = 'client'
+GROUP BY u.UserID, u.FirstName, u.LastName, u.LoyaltyTier;
+GO
+
 -- =============================================
 -- PART 5: Create Functions
 -- =============================================
@@ -302,6 +339,32 @@ BEGIN
       AND (@Status IS NULL OR Status = @Status);
 
     RETURN @Count;
+END;
+GO
+
+-- Function 3: fn_GetUserLoyaltyTier (calculates tier based on completed reservations)
+CREATE FUNCTION fn_GetUserLoyaltyTier
+(
+    @UserID INT
+)
+RETURNS NVARCHAR(20)
+AS
+BEGIN
+    DECLARE @TierName NVARCHAR(20);
+    DECLARE @CompletedCount INT;
+
+    SELECT @CompletedCount = COUNT(*)
+    FROM Reservations
+    WHERE UserID = @UserID AND Status = 'completed';
+
+    SET @TierName = CASE
+        WHEN @CompletedCount >= 30 THEN 'Platinum'
+        WHEN @CompletedCount >= 15 THEN 'Gold'
+        WHEN @CompletedCount >= 5  THEN 'Silver'
+        ELSE 'Bronze'
+    END;
+
+    RETURN @TierName;
 END;
 GO
 
@@ -357,6 +420,36 @@ BEGIN
       AND (@CategoryID IS NULL OR c.CategoryID = @CategoryID)
     GROUP BY c.CategoryName
     ORDER BY TotalRevenue DESC;
+END;
+GO
+
+-- Stored Procedure 3: sp_GetServiceFrequencyAnalysis
+CREATE PROCEDURE sp_GetServiceFrequencyAnalysis
+    @StartDate DATE,
+    @EndDate DATE,
+    @CategoryID INT = NULL
+AS
+BEGIN
+    SELECT
+        s.ServiceID,
+        s.ServiceName,
+        c.CategoryName,
+        COUNT(rs.ReservationID) AS TimesBooked,
+        COUNT(DISTINCT r.UserID) AS UniqueClients,
+        SUM(CASE WHEN r.Status = 'completed' THEN 1 ELSE 0 END) AS CompletedBookings,
+        SUM(CASE WHEN r.Status = 'cancelled' THEN 1 ELSE 0 END) AS CancelledBookings,
+        CAST(
+            SUM(CASE WHEN r.Status = 'completed' THEN 1.0 ELSE 0 END) /
+            NULLIF(COUNT(rs.ReservationID), 0) * 100
+        AS DECIMAL(5,2)) AS CompletionRate
+    FROM Services s
+    JOIN Categories c ON s.CategoryID = c.CategoryID
+    JOIN ReservationServices rs ON s.ServiceID = rs.ServiceID
+    JOIN Reservations r ON rs.ReservationID = r.ReservationID
+    WHERE r.ReservationDate BETWEEN @StartDate AND @EndDate
+      AND (@CategoryID IS NULL OR c.CategoryID = @CategoryID)
+    GROUP BY s.ServiceID, s.ServiceName, c.CategoryName
+    ORDER BY TimesBooked DESC;
 END;
 GO
 
@@ -475,7 +568,10 @@ GRANT SELECT, INSERT ON ReservationServices TO db_client_role;
 GRANT SELECT, INSERT ON Reviews TO db_client_role;
 GRANT SELECT ON Payments TO db_client_role;
 GRANT SELECT ON vw_ServiceCatalog TO db_client_role;
+GRANT SELECT ON vw_ClientLoyaltyOverview TO db_client_role;
 GRANT EXECUTE ON fn_GetUserReservationCount TO db_client_role;
+GRANT EXECUTE ON fn_GetUserLoyaltyTier TO db_client_role;
+GRANT SELECT ON UserLoyaltyBenefits TO db_client_role;
 GO
 
 -- =============================================
@@ -493,13 +589,18 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ReservationServices TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Reviews TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Payments TO db_admin_role;
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON UserLoyaltyBenefits TO db_admin_role;
+
 GRANT SELECT ON vw_ProfessionalDashboard TO db_admin_role;
 GRANT SELECT ON vw_ServiceCatalog TO db_admin_role;
+GRANT SELECT ON vw_ClientLoyaltyOverview TO db_admin_role;
 
 GRANT EXECUTE ON fn_GetProfessionalEarnings TO db_admin_role;
 GRANT EXECUTE ON fn_GetUserReservationCount TO db_admin_role;
+GRANT EXECUTE ON fn_GetUserLoyaltyTier TO db_admin_role;
 GRANT EXECUTE ON sp_GetReservationsByDateRange TO db_admin_role;
 GRANT EXECUTE ON sp_GetRevenueReport TO db_admin_role;
+GRANT EXECUTE ON sp_GetServiceFrequencyAnalysis TO db_admin_role;
 GO
 
 -- =============================================
