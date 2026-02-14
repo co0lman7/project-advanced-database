@@ -8,124 +8,129 @@ This database project implements a comprehensive booking platform for profession
 
 ## Part 1: Database Design
 
-### Entities (Minimum 5 Required)
+### Entities
 
-#### 1. **Professionals**
-Stores information about service providers.
+#### 1. **Users**
+Unified table for all platform users (clients, professionals, admins, etc.).
 | Column | Type | Constraints |
 |--------|------|-------------|
-| ProfessionalID | INT | PRIMARY KEY, IDENTITY |
+| UserID | INT | PRIMARY KEY, IDENTITY |
 | FirstName | NVARCHAR(50) | NOT NULL |
 | LastName | NVARCHAR(50) | NOT NULL |
 | Email | NVARCHAR(100) | UNIQUE, NOT NULL |
-| Phone | PhoneNumber (UDDT) | NOT NULL |
-| Specialization | NVARCHAR(100) | NOT NULL |
-| CategoryID | INT | FOREIGN KEY |
-| HourlyRate | DECIMAL(10,2) | NOT NULL |
+| PasswordHash | NVARCHAR(255) | NOT NULL |
+| Role | NVARCHAR(20) | NOT NULL, CHECK IN ('client', 'professional', 'admin', 'superadmin', 'guest') |
+| IsActive | BIT | DEFAULT 1 |
+| CreatedAt | DATETIME | DEFAULT GETDATE() |
+
+#### 2. **Professionals** (ISA subtype of Users)
+Extended attributes for users with the 'professional' role. Uses ISA (generalization/specialization) relationship with Users.
+| Column | Type | Constraints |
+|--------|------|-------------|
+| ProfessionalID | INT | PRIMARY KEY, FK → Users(UserID) |
 | ExperienceYears | INT | CHECK >= 0 |
 | Bio | NVARCHAR(500) | NULL |
 | IsVerified | BIT | DEFAULT 0 |
-| CreatedAt | DATETIME | DEFAULT GETDATE() |
 
-#### 2. **Clients**
-Stores information about users who book services.
+#### 3. **Availability**
+Professional availability schedule.
 | Column | Type | Constraints |
 |--------|------|-------------|
-| ClientID | INT | PRIMARY KEY, IDENTITY |
-| FirstName | NVARCHAR(50) | NOT NULL |
-| LastName | NVARCHAR(50) | NOT NULL |
-| Email | NVARCHAR(100) | UNIQUE, NOT NULL |
-| Phone | PhoneNumber (UDDT) | NULL |
-| Address | NVARCHAR(200) | NULL |
-| DateOfBirth | DATE | NULL |
-| CreatedAt | DATETIME | DEFAULT GETDATE() |
+| AvailabilityID | INT | PRIMARY KEY, IDENTITY |
+| ProfessionalID | INT | FOREIGN KEY → Professionals |
+| Date | DATE | NOT NULL |
+| StartTime | TIME | NOT NULL |
+| EndTime | TIME | NOT NULL |
+| Status | NVARCHAR(20) | DEFAULT 'available', CHECK IN ('available', 'unavailable', 'booked') |
 
-#### 3. **ServiceCategories**
-Categories/types of professional services.
+#### 4. **Categories**
+Service categories for organizing services.
 | Column | Type | Constraints |
 |--------|------|-------------|
 | CategoryID | INT | PRIMARY KEY, IDENTITY |
 | CategoryName | NVARCHAR(100) | UNIQUE, NOT NULL |
 | Description | NVARCHAR(500) | NULL |
-| ParentCategoryID | INT | FOREIGN KEY (self-referencing) |
+| IsActive | BIT | DEFAULT 1 |
 
-#### 4. **Services**
-Specific services offered by professionals.
+#### 5. **Services**
+Services available on the platform, linked to categories.
 | Column | Type | Constraints |
 |--------|------|-------------|
 | ServiceID | INT | PRIMARY KEY, IDENTITY |
-| ProfessionalID | INT | FOREIGN KEY, NOT NULL |
+| CategoryID | INT | FOREIGN KEY → Categories, NOT NULL |
 | ServiceName | NVARCHAR(100) | NOT NULL |
 | Description | NVARCHAR(500) | NULL |
-| DurationMinutes | INT | NOT NULL, CHECK > 0 |
-| Price | DECIMAL(10,2) | NOT NULL |
+| BasePrice | DECIMAL(10,2) | NOT NULL, CHECK >= 0 |
 | IsActive | BIT | DEFAULT 1 |
 
-#### 5. **Bookings**
-Appointment bookings between clients and professionals.
+#### 6. **ProfessionalServices** (Junction Table)
+M:N relationship between Professionals and Services (a professional offers services with optional custom pricing).
 | Column | Type | Constraints |
 |--------|------|-------------|
-| BookingID | INT | PRIMARY KEY, IDENTITY |
-| ClientID | INT | FOREIGN KEY, NOT NULL |
-| ServiceID | INT | FOREIGN KEY, NOT NULL |
-| ProfessionalID | INT | FOREIGN KEY, NOT NULL |
-| BookingDate | DATETIME | NOT NULL |
-| Status | NVARCHAR(20) | CHECK IN ('Pending', 'Confirmed', 'Completed', 'Cancelled') |
-| Notes | NVARCHAR(500) | NULL |
-| CreatedAt | DATETIME | DEFAULT GETDATE() |
-| UpdatedAt | DATETIME | NULL |
+| ProfessionalID | INT | PK, FK → Professionals |
+| ServiceID | INT | PK, FK → Services |
+| CustomPrice | DECIMAL(10,2) | NULL, CHECK >= 0 |
 
-#### 6. **Reviews**
-Client reviews for completed services.
+#### 7. **Reservations**
+Appointment reservations made by users with professionals.
+| Column | Type | Constraints |
+|--------|------|-------------|
+| ReservationID | INT | PRIMARY KEY, IDENTITY |
+| UserID | INT | FOREIGN KEY → Users, NOT NULL |
+| ProfessionalID | INT | FOREIGN KEY → Professionals, NOT NULL |
+| ReservationDate | DATE | NOT NULL |
+| ReservationTime | TIME | NOT NULL |
+| Status | NVARCHAR(20) | DEFAULT 'pending', CHECK IN ('pending', 'confirmed', 'completed', 'cancelled') |
+| IsPayed | BIT | DEFAULT 0 |
+| CreatedAt | DATETIME | DEFAULT GETDATE() |
+
+#### 8. **ReservationServices** (Junction Table)
+M:N relationship between Reservations and Services (a reservation includes multiple services).
+| Column | Type | Constraints |
+|--------|------|-------------|
+| ReservationID | INT | PK, FK → Reservations |
+| ServiceID | INT | PK, FK → Services |
+
+#### 9. **Payments**
+Payment records for reservations (1:1 with Reservation).
+| Column | Type | Constraints |
+|--------|------|-------------|
+| PaymentID | INT | PRIMARY KEY, IDENTITY |
+| ReservationID | INT | FOREIGN KEY → Reservations, UNIQUE, NOT NULL |
+| Amount | DECIMAL(10,2) | NOT NULL, CHECK >= 0 |
+| Method | NVARCHAR(50) | NOT NULL, CHECK IN ('cash', 'card', 'online') |
+| PaymentStatus | NVARCHAR(20) | DEFAULT 'pending', CHECK IN ('pending', 'completed', 'failed') |
+| TransactionDate | DATETIME | DEFAULT GETDATE() |
+
+#### 10. **Reviews**
+Client reviews for completed reservations (0..1 with Reservation).
 | Column | Type | Constraints |
 |--------|------|-------------|
 | ReviewID | INT | PRIMARY KEY, IDENTITY |
-| BookingID | INT | FOREIGN KEY, UNIQUE, NOT NULL |
+| ReservationID | INT | FOREIGN KEY → Reservations, UNIQUE, NOT NULL |
 | Rating | INT | NOT NULL, CHECK BETWEEN 1 AND 5 |
 | Comment | NVARCHAR(1000) | NULL |
 | CreatedAt | DATETIME | DEFAULT GETDATE() |
 
-#### 7. **Payments**
-Payment records for bookings.
-| Column | Type | Constraints |
-|--------|------|-------------|
-| PaymentID | INT | PRIMARY KEY, IDENTITY |
-| BookingID | INT | FOREIGN KEY, UNIQUE, NOT NULL |
-| Amount | DECIMAL(10,2) | NOT NULL |
-| PaymentMethod | NVARCHAR(50) | NOT NULL |
-| PaymentStatus | NVARCHAR(20) | CHECK IN ('Pending', 'Completed', 'Refunded', 'Failed') |
-| TransactionDate | DATETIME | DEFAULT GETDATE() |
-
-#### 8. **Availability**
-Professional availability schedule.
-| Column | Type | Constraints |
-|--------|------|-------------|
-| AvailabilityID | INT | PRIMARY KEY, IDENTITY |
-| ProfessionalID | INT | FOREIGN KEY, NOT NULL |
-| DayOfWeek | INT | CHECK BETWEEN 0 AND 6 |
-| StartTime | TIME | NOT NULL |
-| EndTime | TIME | NOT NULL |
-| IsAvailable | BIT | DEFAULT 1 |
-
 ### Entity Relationships
 
 ```
-ServiceCategories (1) ----< (M) Professionals
-Professionals (1) ----< (M) Services
-Professionals (1) ----< (M) Availability
-Professionals (1) ----< (M) Bookings
-Clients (1) ----< (M) Bookings
-Services (1) ----< (M) Bookings
-Bookings (1) ---- (1) Reviews
-Bookings (1) ---- (1) Payments
-ServiceCategories (1) ----< (M) ServiceCategories (self-referencing for subcategories)
+Users (1) ---- (0..1) Professionals          [ISA / generalization-specialization]
+Professionals (1) ----< (N) Availability      [has]
+Professionals (N) >----< (M) Services         [offers, via ProfessionalServices]
+Services (N) >---- (1) Categories             [has]
+Users (1) ----< (N) Reservations              [makes]
+Professionals (1) ----< (N) Reservations      [assigned_to]
+Reservations (N) >----< (M) Services          [includes, via ReservationServices]
+Reservations (1) ---- (1) Payments            [is_payed]
+Reservations (1) ---- (0..1) Reviews          [makes]
 ```
 
 ### Normalization
 The database follows 3NF (Third Normal Form):
-- 1NF: All columns contain atomic values, no repeating groups
-- 2NF: All non-key columns fully depend on the primary key
-- 3NF: No transitive dependencies (e.g., Category information in separate table)
+- **1NF**: All columns contain atomic values, no repeating groups
+- **2NF**: All non-key columns fully depend on the primary key. Junction tables (ProfessionalServices, ReservationServices) eliminate partial dependencies
+- **3NF**: No transitive dependencies. Category information is in a separate table. User base attributes are separated from Professional-specific attributes via ISA relationship. Service base pricing is separated from professional-specific custom pricing
 
 ---
 
@@ -135,43 +140,39 @@ The database follows 3NF (Third Normal Form):
 Service providers who manage their services and appointments.
 
 **Permissions:**
-- SELECT, INSERT, UPDATE on their own Services
-- SELECT, UPDATE on Bookings (for their appointments)
-- SELECT on Reviews (their own reviews)
+- SELECT on Users (to view client info for their reservations)
+- SELECT, UPDATE on Professionals (their own profile)
+- SELECT, INSERT, UPDATE on ProfessionalServices (manage their offered services)
 - SELECT, INSERT, UPDATE on Availability (their schedule)
-- SELECT on Clients (limited - only clients who booked with them)
-- NO DELETE permissions on critical tables
-- NO access to Payments details (privacy)
+- SELECT, UPDATE on Reservations (for their appointments)
+- SELECT on ReservationServices, Services, Categories, Reviews
 
 **Restrictions:**
 - Cannot view other professionals' data
-- Cannot modify booking status to 'Completed' without admin approval
-- Cannot delete bookings, only cancel
+- Cannot delete reservations, only update status
+- No direct access to Payments
 
 ### Group 2: **Clients (db_client_role)**
 Users who book and review services.
 
 **Permissions:**
-- SELECT on Professionals, Services, ServiceCategories (public info)
-- SELECT, INSERT on Bookings (their own)
-- UPDATE on Bookings (only status to 'Cancelled')
-- SELECT, INSERT on Reviews (for their completed bookings)
+- SELECT on Users, Professionals, Services, Categories, Availability, ProfessionalServices
+- SELECT, INSERT, UPDATE on Reservations (their own)
+- SELECT, INSERT on ReservationServices (for their reservations)
+- SELECT, INSERT on Reviews (for their completed reservations)
 - SELECT on Payments (their own)
-- SELECT on Availability (to view schedules)
 
 **Restrictions:**
 - Cannot view other clients' information
-- Cannot modify bookings after confirmation (except cancellation)
-- Cannot review without completed booking
+- Cannot modify reservations after confirmation (except cancellation)
+- Cannot review without completed reservation
 
-### Group 3: **Administrators (db_admin_role)** [Optional but recommended]
+### Group 3: **Administrators (db_admin_role)**
 System administrators with full access.
 
 **Permissions:**
 - Full SELECT, INSERT, UPDATE, DELETE on all tables
-- Can verify professionals
-- Can process refunds
-- Access to all reports and analytics
+- Access to all views, functions, and stored procedures
 
 ---
 
@@ -179,338 +180,81 @@ System administrators with full access.
 
 ### Tables Likely to Grow Large
 
-1. **Bookings** - High volume of appointment records
-2. **Reviews** - Accumulates over time
+1. **Reservations** - High volume of appointment records
+2. **ReservationServices** - Multiple services per reservation
 3. **Payments** - Financial transaction history
-
-### Partitioning Strategy
-
-**Bookings Table Partitioning:**
-```sql
--- Partition by BookingDate (monthly partitions)
-CREATE PARTITION FUNCTION pf_BookingDate (DATETIME)
-AS RANGE RIGHT FOR VALUES 
-('2025-01-01', '2025-02-01', '2025-03-01', ...);
-
-CREATE PARTITION SCHEME ps_BookingDate
-AS PARTITION pf_BookingDate ALL TO ([PRIMARY]);
-```
+4. **Reviews** - Accumulates over time
 
 ### Indexing Strategy
 
 ```sql
--- Bookings indexes
-CREATE NONCLUSTERED INDEX IX_Bookings_ClientID ON Bookings(ClientID);
-CREATE NONCLUSTERED INDEX IX_Bookings_ProfessionalID ON Bookings(ProfessionalID);
-CREATE NONCLUSTERED INDEX IX_Bookings_BookingDate ON Bookings(BookingDate);
-CREATE NONCLUSTERED INDEX IX_Bookings_Status ON Bookings(Status);
+-- Users indexes
+CREATE NONCLUSTERED INDEX IX_Users_Role ON Users(Role);
+CREATE NONCLUSTERED INDEX IX_Users_Email ON Users(Email);
 
--- Professionals indexes
-CREATE NONCLUSTERED INDEX IX_Professionals_CategoryID ON Professionals(CategoryID);
-CREATE NONCLUSTERED INDEX IX_Professionals_Specialization ON Professionals(Specialization);
+-- Reservations indexes
+CREATE NONCLUSTERED INDEX IX_Reservations_UserID ON Reservations(UserID);
+CREATE NONCLUSTERED INDEX IX_Reservations_ProfessionalID ON Reservations(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Reservations_Date ON Reservations(ReservationDate);
+CREATE NONCLUSTERED INDEX IX_Reservations_Status ON Reservations(Status);
 
 -- Services indexes
-CREATE NONCLUSTERED INDEX IX_Services_ProfessionalID ON Services(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Services_CategoryID ON Services(CategoryID);
 CREATE NONCLUSTERED INDEX IX_Services_IsActive ON Services(IsActive) WHERE IsActive = 1;
 
+-- Availability indexes
+CREATE NONCLUSTERED INDEX IX_Availability_ProfessionalID ON Availability(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Availability_Date ON Availability(Date);
+
 -- Reviews indexes
-CREATE NONCLUSTERED INDEX IX_Reviews_BookingID ON Reviews(BookingID);
+CREATE NONCLUSTERED INDEX IX_Reviews_ReservationID ON Reviews(ReservationID);
 ```
 
 ---
 
 ## Part 3: Application Components
 
-### Views (Minimum 2)
+### Views (2)
 
 #### View 1: **vw_ProfessionalDashboard** (For Professionals)
-Shows professional's booking summary, upcoming appointments, and average rating.
-```sql
-CREATE VIEW vw_ProfessionalDashboard AS
-SELECT 
-    p.ProfessionalID,
-    p.FirstName + ' ' + p.LastName AS ProfessionalName,
-    COUNT(b.BookingID) AS TotalBookings,
-    SUM(CASE WHEN b.Status = 'Completed' THEN 1 ELSE 0 END) AS CompletedBookings,
-    AVG(CAST(r.Rating AS DECIMAL(3,2))) AS AverageRating,
-    SUM(pay.Amount) AS TotalEarnings
-FROM Professionals p
-LEFT JOIN Bookings b ON p.ProfessionalID = b.ProfessionalID
-LEFT JOIN Reviews r ON b.BookingID = r.BookingID
-LEFT JOIN Payments pay ON b.BookingID = pay.BookingID AND pay.PaymentStatus = 'Completed'
-GROUP BY p.ProfessionalID, p.FirstName, p.LastName;
-```
+Shows professional's reservation summary, completed count, average rating, and total earnings.
 
 #### View 2: **vw_ServiceCatalog** (For Clients)
-Public view of available services with professional info (no sensitive data).
-```sql
-CREATE VIEW vw_ServiceCatalog AS
-SELECT 
-    s.ServiceID,
-    s.ServiceName,
-    s.Description,
-    s.Price,
-    s.DurationMinutes,
-    p.FirstName + ' ' + p.LastName AS ProfessionalName,
-    p.Specialization,
-    p.ExperienceYears,
-    c.CategoryName,
-    AVG(CAST(r.Rating AS DECIMAL(3,2))) AS AverageRating,
-    COUNT(r.ReviewID) AS ReviewCount
-FROM Services s
-JOIN Professionals p ON s.ProfessionalID = p.ProfessionalID
-JOIN ServiceCategories c ON p.CategoryID = c.CategoryID
-LEFT JOIN Bookings b ON s.ServiceID = b.ServiceID
-LEFT JOIN Reviews r ON b.BookingID = r.BookingID
-WHERE s.IsActive = 1 AND p.IsVerified = 1
-GROUP BY s.ServiceID, s.ServiceName, s.Description, s.Price, s.DurationMinutes,
-         p.FirstName, p.LastName, p.Specialization, p.ExperienceYears, c.CategoryName;
-```
+Public view of available services with professional info, category, custom pricing, and ratings.
 
-### Functions (Minimum 2)
+### Functions (2)
 
-#### Function 1: **fn_GetProfessionalEarnings** (For Professionals)
-Calculate total earnings for a professional within a date range.
-```sql
-CREATE FUNCTION fn_GetProfessionalEarnings
-(
-    @ProfessionalID INT,
-    @StartDate DATE,
-    @EndDate DATE
-)
-RETURNS DECIMAL(12,2)
-AS
-BEGIN
-    DECLARE @TotalEarnings DECIMAL(12,2);
-    
-    SELECT @TotalEarnings = ISNULL(SUM(pay.Amount), 0)
-    FROM Payments pay
-    JOIN Bookings b ON pay.BookingID = b.BookingID
-    WHERE b.ProfessionalID = @ProfessionalID
-      AND pay.PaymentStatus = 'Completed'
-      AND pay.TransactionDate BETWEEN @StartDate AND @EndDate;
-    
-    RETURN @TotalEarnings;
-END;
-```
+#### Function 1: **fn_GetProfessionalEarnings**
+Calculate total earnings for a professional within a date range. Parameters: `@ProfessionalID`, `@StartDate`, `@EndDate`.
 
-#### Function 2: **fn_GetClientBookingCount** (For Clients)
-Get the number of bookings for a client by status.
-```sql
-CREATE FUNCTION fn_GetClientBookingCount
-(
-    @ClientID INT,
-    @Status NVARCHAR(20) = NULL
-)
-RETURNS INT
-AS
-BEGIN
-    DECLARE @Count INT;
-    
-    SELECT @Count = COUNT(*)
-    FROM Bookings
-    WHERE ClientID = @ClientID
-      AND (@Status IS NULL OR Status = @Status);
-    
-    RETURN @Count;
-END;
-```
+#### Function 2: **fn_GetUserReservationCount**
+Get the number of reservations for a user, optionally filtered by status. Parameters: `@UserID`, `@Status` (optional).
 
-### Stored Procedures (Minimum 2)
+### Stored Procedures (2)
 
-#### Stored Procedure 1: **sp_GetBookingsByDateRange**
-Parametric search for bookings within a date range.
-```sql
-CREATE PROCEDURE sp_GetBookingsByDateRange
-    @StartDate DATETIME,
-    @EndDate DATETIME,
-    @ProfessionalID INT = NULL,
-    @Status NVARCHAR(20) = NULL
-AS
-BEGIN
-    SELECT 
-        b.BookingID,
-        b.BookingDate,
-        b.Status,
-        c.FirstName + ' ' + c.LastName AS ClientName,
-        s.ServiceName,
-        p.FirstName + ' ' + p.LastName AS ProfessionalName
-    FROM Bookings b
-    JOIN Clients c ON b.ClientID = c.ClientID
-    JOIN Services s ON b.ServiceID = s.ServiceID
-    JOIN Professionals p ON b.ProfessionalID = p.ProfessionalID
-    WHERE b.BookingDate BETWEEN @StartDate AND @EndDate
-      AND (@ProfessionalID IS NULL OR b.ProfessionalID = @ProfessionalID)
-      AND (@Status IS NULL OR b.Status = @Status)
-    ORDER BY b.BookingDate;
-END;
-```
+#### Stored Procedure 1: **sp_GetReservationsByDateRange**
+Parametric search for reservations within a date range, with optional filters for professional and status.
 
 #### Stored Procedure 2: **sp_GetRevenueReport**
 Generate revenue report by category and time period.
-```sql
-CREATE PROCEDURE sp_GetRevenueReport
-    @StartDate DATE,
-    @EndDate DATE,
-    @CategoryID INT = NULL
-AS
-BEGIN
-    SELECT 
-        sc.CategoryName,
-        COUNT(DISTINCT b.BookingID) AS TotalBookings,
-        COUNT(DISTINCT b.ClientID) AS UniqueClients,
-        SUM(pay.Amount) AS TotalRevenue,
-        AVG(pay.Amount) AS AverageBookingValue
-    FROM Payments pay
-    JOIN Bookings b ON pay.BookingID = b.BookingID
-    JOIN Professionals p ON b.ProfessionalID = p.ProfessionalID
-    JOIN ServiceCategories sc ON p.CategoryID = sc.CategoryID
-    WHERE pay.PaymentStatus = 'Completed'
-      AND pay.TransactionDate BETWEEN @StartDate AND @EndDate
-      AND (@CategoryID IS NULL OR sc.CategoryID = @CategoryID)
-    GROUP BY sc.CategoryName
-    ORDER BY TotalRevenue DESC;
-END;
-```
 
 ### User Defined Data Type (UDDT)
 
 #### **PhoneNumber**
 A custom data type for standardized phone number storage.
-```sql
--- Create the UDDT
-CREATE TYPE PhoneNumber FROM VARCHAR(20) NOT NULL;
+- Base type: `VARCHAR(20) NOT NULL`
+- Rule: Must start with `+` followed by digits, length between 10 and 20
 
--- Create a rule for validation
-CREATE RULE rule_PhoneNumber AS
-    @value LIKE '+[0-9]%' 
-    AND LEN(@value) >= 10 
-    AND LEN(@value) <= 20;
+### Triggers (3)
 
--- Bind the rule to the type
-EXEC sp_bindrule 'rule_PhoneNumber', 'PhoneNumber';
-```
+#### Trigger 1: **trg_PreventDoubleReservation** (INSTEAD OF INSERT on Reservations)
+Prevents overlapping reservations for the same professional at the same date and time.
 
-### Triggers (Minimum 3)
+#### Trigger 2: **trg_UpdateReservationPaymentStatus** (AFTER INSERT/UPDATE on Payments)
+Automatically sets `IsPayed = 1` on the reservation when payment status becomes 'completed'.
 
-#### Trigger 1: **trg_PreventDoubleBooking** (INSERT)
-Prevents overlapping bookings for the same professional.
-```sql
-CREATE TRIGGER trg_PreventDoubleBooking
-ON Bookings
-INSTEAD OF INSERT
-AS
-BEGIN
-    IF EXISTS (
-        SELECT 1 
-        FROM inserted i
-        JOIN Bookings b ON i.ProfessionalID = b.ProfessionalID
-        JOIN Services s ON i.ServiceID = s.ServiceID
-        WHERE b.Status NOT IN ('Cancelled')
-          AND i.BookingDate < DATEADD(MINUTE, 
-              (SELECT DurationMinutes FROM Services WHERE ServiceID = b.ServiceID), 
-              b.BookingDate)
-          AND DATEADD(MINUTE, s.DurationMinutes, i.BookingDate) > b.BookingDate
-    )
-    BEGIN
-        RAISERROR('Booking conflicts with an existing appointment.', 16, 1);
-        RETURN;
-    END
-    
-    INSERT INTO Bookings (ClientID, ServiceID, ProfessionalID, BookingDate, Status, Notes, CreatedAt)
-    SELECT ClientID, ServiceID, ProfessionalID, BookingDate, Status, Notes, GETDATE()
-    FROM inserted;
-END;
-```
-
-#### Trigger 2: **trg_UpdateBookingTimestamp** (UPDATE)
-Automatically updates the UpdatedAt timestamp when booking is modified.
-```sql
-CREATE TRIGGER trg_UpdateBookingTimestamp
-ON Bookings
-AFTER UPDATE
-AS
-BEGIN
-    UPDATE Bookings
-    SET UpdatedAt = GETDATE()
-    FROM Bookings b
-    INNER JOIN inserted i ON b.BookingID = i.BookingID;
-END;
-```
-
-#### Trigger 3: **trg_ValidateReview** (INSERT)
-Ensures reviews can only be created for completed bookings.
-```sql
-CREATE TRIGGER trg_ValidateReview
-ON Reviews
-INSTEAD OF INSERT
-AS
-BEGIN
-    IF EXISTS (
-        SELECT 1 FROM inserted i
-        JOIN Bookings b ON i.BookingID = b.BookingID
-        WHERE b.Status != 'Completed'
-    )
-    BEGIN
-        RAISERROR('Reviews can only be submitted for completed bookings.', 16, 1);
-        RETURN;
-    END
-    
-    INSERT INTO Reviews (BookingID, Rating, Comment, CreatedAt)
-    SELECT BookingID, Rating, Comment, GETDATE()
-    FROM inserted;
-END;
-```
-
----
-
-## Project Roadmap
-
-### Phase 1: Database Foundation
-- [ ] Create SQL Server database
-- [ ] Create all tables with proper constraints
-- [ ] Implement User Defined Data Type (PhoneNumber)
-- [ ] Create rules and bind to UDDT
-- [ ] Populate each table with minimum 20 records
-- [ ] Document relational schema (ER diagram)
-
-### Phase 2: Security & Users
-- [ ] Create database roles (db_professional_role, db_client_role, db_admin_role)
-- [ ] Create sample users for each role
-- [ ] Grant appropriate permissions to each role
-- [ ] Test permission restrictions
-
-### Phase 3: Performance Optimization
-- [ ] Implement partitioning on Bookings table
-- [ ] Create all necessary indexes
-- [ ] Test query performance
-- [ ] Document optimization decisions
-
-### Phase 4: Database Objects
-- [ ] Create View 1: vw_ProfessionalDashboard
-- [ ] Create View 2: vw_ServiceCatalog
-- [ ] Create Function 1: fn_GetProfessionalEarnings
-- [ ] Create Function 2: fn_GetClientBookingCount
-- [ ] Create Stored Procedure 1: sp_GetBookingsByDateRange
-- [ ] Create Stored Procedure 2: sp_GetRevenueReport
-- [ ] Create Trigger 1: trg_PreventDoubleBooking
-- [ ] Create Trigger 2: trg_UpdateBookingTimestamp
-- [ ] Create Trigger 3: trg_ValidateReview
-
-### Phase 5: Web Application
-- [ ] Set up web application framework
-- [ ] Create Professional interface (login, dashboard, manage services)
-- [ ] Create Client interface (browse services, book, review)
-- [ ] Integrate Views for reports display
-- [ ] Implement Functions for calculations
-- [ ] Connect Stored Procedures for date-based queries
-- [ ] Test data entry forms with Triggers
-
-### Phase 6: Documentation & Delivery
-- [ ] Write final documentation (PDF)
-- [ ] Include all SQL scripts
-- [ ] Prepare database backup
-- [ ] Test presentation on personal computer
+#### Trigger 3: **trg_ValidateReview** (INSTEAD OF INSERT on Reviews)
+Ensures reviews can only be created for completed reservations.
 
 ---
 
@@ -518,7 +262,7 @@ END;
 
 1. **Documentation (PDF)**
    - Project description and topic explanation
-   - Relational schema diagram
+   - Relational schema diagram (ER diagram)
    - User groups and permissions documentation
    - Performance optimization explanation
    - All SQL object code
@@ -530,7 +274,7 @@ END;
 3. **SQL Scripts**
    - Table creation scripts
    - UDDT and Rules scripts
-   - Index and Partition scripts
+   - Index scripts
    - Views scripts
    - Functions scripts
    - Stored Procedures scripts

@@ -1,6 +1,7 @@
 -- =============================================
 -- Professional Services Booking Platform
 -- Database Creation Script for SQL Server
+-- Updated to match ER Diagram
 -- =============================================
 
 -- Create Database
@@ -44,119 +45,139 @@ GO
 -- PART 2: Create Tables
 -- =============================================
 
--- 1. ServiceCategories Table (must be created first due to self-referencing FK)
-CREATE TABLE ServiceCategories (
-    CategoryID INT PRIMARY KEY IDENTITY(1,1),
-    CategoryName NVARCHAR(100) UNIQUE NOT NULL,
-    Description NVARCHAR(500) NULL,
-    ParentCategoryID INT NULL,
-    CONSTRAINT FK_ServiceCategories_Parent FOREIGN KEY (ParentCategoryID)
-        REFERENCES ServiceCategories(CategoryID)
-);
-GO
-
--- 2. Professionals Table
-CREATE TABLE Professionals (
-    ProfessionalID INT PRIMARY KEY IDENTITY(1,1),
+-- 1. Users Table (unified - replaces separate Professionals/Clients)
+CREATE TABLE Users (
+    UserID INT PRIMARY KEY IDENTITY(1,1),
     FirstName NVARCHAR(50) NOT NULL,
     LastName NVARCHAR(50) NOT NULL,
     Email NVARCHAR(100) UNIQUE NOT NULL,
-    Phone PhoneNumber NOT NULL,
-    Specialization NVARCHAR(100) NOT NULL,
-    CategoryID INT NOT NULL,
-    HourlyRate DECIMAL(10,2) NOT NULL,
-    ExperienceYears INT CHECK (ExperienceYears >= 0),
-    Bio NVARCHAR(500) NULL,
-    IsVerified BIT DEFAULT 0,
-    CreatedAt DATETIME DEFAULT GETDATE(),
-    CONSTRAINT FK_Professionals_Category FOREIGN KEY (CategoryID)
-        REFERENCES ServiceCategories(CategoryID)
-);
-GO
-
--- 3. Clients Table
-CREATE TABLE Clients (
-    ClientID INT PRIMARY KEY IDENTITY(1,1),
-    FirstName NVARCHAR(50) NOT NULL,
-    LastName NVARCHAR(50) NOT NULL,
-    Email NVARCHAR(100) UNIQUE NOT NULL,
-    Phone VARCHAR(20) NULL,
-    Address NVARCHAR(200) NULL,
-    DateOfBirth DATE NULL,
+    PasswordHash NVARCHAR(255) NOT NULL,
+    Role NVARCHAR(20) NOT NULL CHECK (Role IN ('client', 'professional', 'admin', 'superadmin', 'guest')),
+    IsActive BIT DEFAULT 1,
     CreatedAt DATETIME DEFAULT GETDATE()
 );
 GO
 
--- 4. Services Table
-CREATE TABLE Services (
-    ServiceID INT PRIMARY KEY IDENTITY(1,1),
-    ProfessionalID INT NOT NULL,
-    ServiceName NVARCHAR(100) NOT NULL,
-    Description NVARCHAR(500) NULL,
-    DurationMinutes INT NOT NULL CHECK (DurationMinutes > 0),
-    Price DECIMAL(10,2) NOT NULL,
-    IsActive BIT DEFAULT 1,
-    CONSTRAINT FK_Services_Professional FOREIGN KEY (ProfessionalID)
-        REFERENCES Professionals(ProfessionalID)
+-- 2. Professionals Table (ISA subtype of Users)
+CREATE TABLE Professionals (
+    ProfessionalID INT PRIMARY KEY,
+    ExperienceYears INT CHECK (ExperienceYears >= 0),
+    Bio NVARCHAR(500) NULL,
+    IsVerified BIT DEFAULT 0,
+    CONSTRAINT FK_Professional_User FOREIGN KEY (ProfessionalID)
+        REFERENCES Users(UserID)
+        ON DELETE CASCADE
 );
 GO
 
--- 5. Availability Table
+-- 3. Availability Table
 CREATE TABLE Availability (
     AvailabilityID INT PRIMARY KEY IDENTITY(1,1),
     ProfessionalID INT NOT NULL,
-    DayOfWeek INT CHECK (DayOfWeek BETWEEN 0 AND 6),
+    Date DATE NOT NULL,
     StartTime TIME NOT NULL,
     EndTime TIME NOT NULL,
-    IsAvailable BIT DEFAULT 1,
+    Status NVARCHAR(20) DEFAULT 'available' CHECK (Status IN ('available', 'unavailable', 'booked')),
     CONSTRAINT FK_Availability_Professional FOREIGN KEY (ProfessionalID)
-        REFERENCES Professionals(ProfessionalID),
+        REFERENCES Professionals(ProfessionalID)
+        ON DELETE CASCADE,
     CONSTRAINT CHK_Availability_TimeRange CHECK (EndTime > StartTime)
 );
 GO
 
--- 6. Bookings Table
-CREATE TABLE Bookings (
-    BookingID INT PRIMARY KEY IDENTITY(1,1),
-    ClientID INT NOT NULL,
-    ServiceID INT NOT NULL,
+-- 4. Categories Table
+CREATE TABLE Categories (
+    CategoryID INT PRIMARY KEY IDENTITY(1,1),
+    CategoryName NVARCHAR(100) UNIQUE NOT NULL,
+    Description NVARCHAR(500) NULL,
+    IsActive BIT DEFAULT 1
+);
+GO
+
+-- 5. Services Table (linked to Categories)
+CREATE TABLE Services (
+    ServiceID INT PRIMARY KEY IDENTITY(1,1),
+    CategoryID INT NOT NULL,
+    ServiceName NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(500) NULL,
+    BasePrice DECIMAL(10,2) NOT NULL CHECK (BasePrice >= 0),
+    IsActive BIT DEFAULT 1,
+    CONSTRAINT FK_Service_Category FOREIGN KEY (CategoryID)
+        REFERENCES Categories(CategoryID)
+        ON DELETE NO ACTION
+);
+GO
+
+-- 6. ProfessionalServices Junction Table (M:N - Professional offers Service)
+CREATE TABLE ProfessionalServices (
     ProfessionalID INT NOT NULL,
-    BookingDate DATETIME NOT NULL,
-    Status NVARCHAR(20) CHECK (Status IN ('Pending', 'Confirmed', 'Completed', 'Cancelled')),
-    Notes NVARCHAR(500) NULL,
+    ServiceID INT NOT NULL,
+    CustomPrice DECIMAL(10,2) NULL CHECK (CustomPrice >= 0),
+    PRIMARY KEY (ProfessionalID, ServiceID),
+    CONSTRAINT FK_PS_Professional FOREIGN KEY (ProfessionalID)
+        REFERENCES Professionals(ProfessionalID)
+        ON DELETE CASCADE,
+    CONSTRAINT FK_PS_Service FOREIGN KEY (ServiceID)
+        REFERENCES Services(ServiceID)
+        ON DELETE CASCADE
+);
+GO
+
+-- 7. Reservations Table (replaces Bookings)
+CREATE TABLE Reservations (
+    ReservationID INT PRIMARY KEY IDENTITY(1,1),
+    UserID INT NOT NULL,
+    ProfessionalID INT NOT NULL,
+    ReservationDate DATE NOT NULL,
+    ReservationTime TIME NOT NULL,
+    Status NVARCHAR(20) DEFAULT 'pending' CHECK (Status IN ('pending', 'confirmed', 'completed', 'cancelled')),
+    IsPayed BIT DEFAULT 0,
     CreatedAt DATETIME DEFAULT GETDATE(),
-    UpdatedAt DATETIME NULL,
-    CONSTRAINT FK_Bookings_Client FOREIGN KEY (ClientID)
-        REFERENCES Clients(ClientID),
-    CONSTRAINT FK_Bookings_Service FOREIGN KEY (ServiceID)
-        REFERENCES Services(ServiceID),
-    CONSTRAINT FK_Bookings_Professional FOREIGN KEY (ProfessionalID)
+    CONSTRAINT FK_Reservation_User FOREIGN KEY (UserID)
+        REFERENCES Users(UserID),
+    CONSTRAINT FK_Reservation_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
 );
 GO
 
--- 7. Reviews Table
-CREATE TABLE Reviews (
-    ReviewID INT PRIMARY KEY IDENTITY(1,1),
-    BookingID INT UNIQUE NOT NULL,
-    Rating INT NOT NULL CHECK (Rating BETWEEN 1 AND 5),
-    Comment NVARCHAR(1000) NULL,
-    CreatedAt DATETIME DEFAULT GETDATE(),
-    CONSTRAINT FK_Reviews_Booking FOREIGN KEY (BookingID)
-        REFERENCES Bookings(BookingID)
+-- 8. ReservationServices Junction Table (M:N - Reservation includes Service)
+CREATE TABLE ReservationServices (
+    ReservationID INT NOT NULL,
+    ServiceID INT NOT NULL,
+    PRIMARY KEY (ReservationID, ServiceID),
+    CONSTRAINT FK_RS_Reservation FOREIGN KEY (ReservationID)
+        REFERENCES Reservations(ReservationID)
+        ON DELETE CASCADE,
+    CONSTRAINT FK_RS_Service FOREIGN KEY (ServiceID)
+        REFERENCES Services(ServiceID)
+        ON DELETE CASCADE
 );
 GO
 
--- 8. Payments Table
+-- 9. Payments Table (1:1 with Reservation)
 CREATE TABLE Payments (
     PaymentID INT PRIMARY KEY IDENTITY(1,1),
-    BookingID INT UNIQUE NOT NULL,
-    Amount DECIMAL(10,2) NOT NULL,
-    PaymentMethod NVARCHAR(50) NOT NULL,
-    PaymentStatus NVARCHAR(20) CHECK (PaymentStatus IN ('Pending', 'Completed', 'Refunded', 'Failed')),
+    ReservationID INT UNIQUE NOT NULL,
+    Amount DECIMAL(10,2) NOT NULL CHECK (Amount >= 0),
+    Method NVARCHAR(50) NOT NULL CHECK (Method IN ('cash', 'card', 'online')),
+    PaymentStatus NVARCHAR(20) DEFAULT 'pending' CHECK (PaymentStatus IN ('pending', 'completed', 'failed')),
     TransactionDate DATETIME DEFAULT GETDATE(),
-    CONSTRAINT FK_Payments_Booking FOREIGN KEY (BookingID)
-        REFERENCES Bookings(BookingID)
+    CONSTRAINT FK_Payment_Reservation FOREIGN KEY (ReservationID)
+        REFERENCES Reservations(ReservationID)
+        ON DELETE CASCADE
+);
+GO
+
+-- 10. Reviews Table (0..1 with Reservation)
+CREATE TABLE Reviews (
+    ReviewID INT PRIMARY KEY IDENTITY(1,1),
+    ReservationID INT UNIQUE NOT NULL,
+    Rating INT NOT NULL CHECK (Rating BETWEEN 1 AND 5),
+    Comment NVARCHAR(1000) NULL,
+    CreatedAt DATETIME DEFAULT GETDATE(),
+    CONSTRAINT FK_Review_Reservation FOREIGN KEY (ReservationID)
+        REFERENCES Reservations(ReservationID)
+        ON DELETE CASCADE
 );
 GO
 
@@ -164,25 +185,30 @@ GO
 -- PART 3: Create Indexes for Performance
 -- =============================================
 
--- Bookings indexes
-CREATE NONCLUSTERED INDEX IX_Bookings_ClientID ON Bookings(ClientID);
-CREATE NONCLUSTERED INDEX IX_Bookings_ProfessionalID ON Bookings(ProfessionalID);
-CREATE NONCLUSTERED INDEX IX_Bookings_BookingDate ON Bookings(BookingDate);
-CREATE NONCLUSTERED INDEX IX_Bookings_Status ON Bookings(Status);
+-- Users indexes
+CREATE NONCLUSTERED INDEX IX_Users_Role ON Users(Role);
+CREATE NONCLUSTERED INDEX IX_Users_Email ON Users(Email);
 GO
 
--- Professionals indexes
-CREATE NONCLUSTERED INDEX IX_Professionals_CategoryID ON Professionals(CategoryID);
-CREATE NONCLUSTERED INDEX IX_Professionals_Specialization ON Professionals(Specialization);
+-- Reservations indexes
+CREATE NONCLUSTERED INDEX IX_Reservations_UserID ON Reservations(UserID);
+CREATE NONCLUSTERED INDEX IX_Reservations_ProfessionalID ON Reservations(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Reservations_Date ON Reservations(ReservationDate);
+CREATE NONCLUSTERED INDEX IX_Reservations_Status ON Reservations(Status);
 GO
 
 -- Services indexes
-CREATE NONCLUSTERED INDEX IX_Services_ProfessionalID ON Services(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Services_CategoryID ON Services(CategoryID);
 CREATE NONCLUSTERED INDEX IX_Services_IsActive ON Services(IsActive) WHERE IsActive = 1;
 GO
 
+-- Availability indexes
+CREATE NONCLUSTERED INDEX IX_Availability_ProfessionalID ON Availability(ProfessionalID);
+CREATE NONCLUSTERED INDEX IX_Availability_Date ON Availability(Date);
+GO
+
 -- Reviews indexes
-CREATE NONCLUSTERED INDEX IX_Reviews_BookingID ON Reviews(BookingID);
+CREATE NONCLUSTERED INDEX IX_Reviews_ReservationID ON Reviews(ReservationID);
 GO
 
 -- =============================================
@@ -193,16 +219,17 @@ GO
 CREATE VIEW vw_ProfessionalDashboard AS
 SELECT
     p.ProfessionalID,
-    p.FirstName + ' ' + p.LastName AS ProfessionalName,
-    COUNT(b.BookingID) AS TotalBookings,
-    SUM(CASE WHEN b.Status = 'Completed' THEN 1 ELSE 0 END) AS CompletedBookings,
-    AVG(CAST(r.Rating AS DECIMAL(3,2))) AS AverageRating,
-    SUM(CASE WHEN pay.PaymentStatus = 'Completed' THEN pay.Amount ELSE 0 END) AS TotalEarnings
+    u.FirstName + ' ' + u.LastName AS ProfessionalName,
+    COUNT(DISTINCT r.ReservationID) AS TotalReservations,
+    SUM(CASE WHEN r.Status = 'completed' THEN 1 ELSE 0 END) AS CompletedReservations,
+    AVG(CAST(rev.Rating AS DECIMAL(3,2))) AS AverageRating,
+    SUM(CASE WHEN pay.PaymentStatus = 'completed' THEN pay.Amount ELSE 0 END) AS TotalEarnings
 FROM Professionals p
-LEFT JOIN Bookings b ON p.ProfessionalID = b.ProfessionalID
-LEFT JOIN Reviews r ON b.BookingID = r.BookingID
-LEFT JOIN Payments pay ON b.BookingID = pay.BookingID
-GROUP BY p.ProfessionalID, p.FirstName, p.LastName;
+JOIN Users u ON p.ProfessionalID = u.UserID
+LEFT JOIN Reservations r ON p.ProfessionalID = r.ProfessionalID
+LEFT JOIN Reviews rev ON r.ReservationID = rev.ReservationID
+LEFT JOIN Payments pay ON r.ReservationID = pay.ReservationID
+GROUP BY p.ProfessionalID, u.FirstName, u.LastName;
 GO
 
 -- View 2: vw_ServiceCatalog
@@ -211,22 +238,24 @@ SELECT
     s.ServiceID,
     s.ServiceName,
     s.Description,
-    s.Price,
-    s.DurationMinutes,
-    p.FirstName + ' ' + p.LastName AS ProfessionalName,
-    p.Specialization,
-    p.ExperienceYears,
+    s.BasePrice,
     c.CategoryName,
-    AVG(CAST(r.Rating AS DECIMAL(3,2))) AS AverageRating,
-    COUNT(r.ReviewID) AS ReviewCount
+    u.FirstName + ' ' + u.LastName AS ProfessionalName,
+    p.ExperienceYears,
+    ps.CustomPrice,
+    AVG(CAST(rev.Rating AS DECIMAL(3,2))) AS AverageRating,
+    COUNT(DISTINCT rev.ReviewID) AS ReviewCount
 FROM Services s
-JOIN Professionals p ON s.ProfessionalID = p.ProfessionalID
-JOIN ServiceCategories c ON p.CategoryID = c.CategoryID
-LEFT JOIN Bookings b ON s.ServiceID = b.ServiceID
-LEFT JOIN Reviews r ON b.BookingID = r.BookingID
+JOIN Categories c ON s.CategoryID = c.CategoryID
+JOIN ProfessionalServices ps ON s.ServiceID = ps.ServiceID
+JOIN Professionals p ON ps.ProfessionalID = p.ProfessionalID
+JOIN Users u ON p.ProfessionalID = u.UserID
+LEFT JOIN Reservations r ON r.ProfessionalID = p.ProfessionalID
+LEFT JOIN ReservationServices rs ON r.ReservationID = rs.ReservationID AND rs.ServiceID = s.ServiceID
+LEFT JOIN Reviews rev ON r.ReservationID = rev.ReservationID
 WHERE s.IsActive = 1 AND p.IsVerified = 1
-GROUP BY s.ServiceID, s.ServiceName, s.Description, s.Price, s.DurationMinutes,
-         p.FirstName, p.LastName, p.Specialization, p.ExperienceYears, c.CategoryName;
+GROUP BY s.ServiceID, s.ServiceName, s.Description, s.BasePrice, c.CategoryName,
+         u.FirstName, u.LastName, p.ExperienceYears, ps.CustomPrice;
 GO
 
 -- =============================================
@@ -247,19 +276,19 @@ BEGIN
 
     SELECT @TotalEarnings = ISNULL(SUM(pay.Amount), 0)
     FROM Payments pay
-    JOIN Bookings b ON pay.BookingID = b.BookingID
-    WHERE b.ProfessionalID = @ProfessionalID
-      AND pay.PaymentStatus = 'Completed'
+    JOIN Reservations r ON pay.ReservationID = r.ReservationID
+    WHERE r.ProfessionalID = @ProfessionalID
+      AND pay.PaymentStatus = 'completed'
       AND pay.TransactionDate BETWEEN @StartDate AND @EndDate;
 
     RETURN @TotalEarnings;
 END;
 GO
 
--- Function 2: fn_GetClientBookingCount
-CREATE FUNCTION fn_GetClientBookingCount
+-- Function 2: fn_GetUserReservationCount
+CREATE FUNCTION fn_GetUserReservationCount
 (
-    @ClientID INT,
+    @UserID INT,
     @Status NVARCHAR(20) = NULL
 )
 RETURNS INT
@@ -268,8 +297,8 @@ BEGIN
     DECLARE @Count INT;
 
     SELECT @Count = COUNT(*)
-    FROM Bookings
-    WHERE ClientID = @ClientID
+    FROM Reservations
+    WHERE UserID = @UserID
       AND (@Status IS NULL OR Status = @Status);
 
     RETURN @Count;
@@ -280,29 +309,28 @@ GO
 -- PART 6: Create Stored Procedures
 -- =============================================
 
--- Stored Procedure 1: sp_GetBookingsByDateRange
-CREATE PROCEDURE sp_GetBookingsByDateRange
-    @StartDate DATETIME,
-    @EndDate DATETIME,
+-- Stored Procedure 1: sp_GetReservationsByDateRange
+CREATE PROCEDURE sp_GetReservationsByDateRange
+    @StartDate DATE,
+    @EndDate DATE,
     @ProfessionalID INT = NULL,
     @Status NVARCHAR(20) = NULL
 AS
 BEGIN
     SELECT
-        b.BookingID,
-        b.BookingDate,
-        b.Status,
-        c.FirstName + ' ' + c.LastName AS ClientName,
-        s.ServiceName,
-        p.FirstName + ' ' + p.LastName AS ProfessionalName
-    FROM Bookings b
-    JOIN Clients c ON b.ClientID = c.ClientID
-    JOIN Services s ON b.ServiceID = s.ServiceID
-    JOIN Professionals p ON b.ProfessionalID = p.ProfessionalID
-    WHERE b.BookingDate BETWEEN @StartDate AND @EndDate
-      AND (@ProfessionalID IS NULL OR b.ProfessionalID = @ProfessionalID)
-      AND (@Status IS NULL OR b.Status = @Status)
-    ORDER BY b.BookingDate;
+        r.ReservationID,
+        r.ReservationDate,
+        r.ReservationTime,
+        r.Status,
+        uc.FirstName + ' ' + uc.LastName AS ClientName,
+        up.FirstName + ' ' + up.LastName AS ProfessionalName
+    FROM Reservations r
+    JOIN Users uc ON r.UserID = uc.UserID
+    JOIN Users up ON r.ProfessionalID = up.UserID
+    WHERE r.ReservationDate BETWEEN @StartDate AND @EndDate
+      AND (@ProfessionalID IS NULL OR r.ProfessionalID = @ProfessionalID)
+      AND (@Status IS NULL OR r.Status = @Status)
+    ORDER BY r.ReservationDate, r.ReservationTime;
 END;
 GO
 
@@ -314,19 +342,20 @@ CREATE PROCEDURE sp_GetRevenueReport
 AS
 BEGIN
     SELECT
-        sc.CategoryName,
-        COUNT(DISTINCT b.BookingID) AS TotalBookings,
-        COUNT(DISTINCT b.ClientID) AS UniqueClients,
+        c.CategoryName,
+        COUNT(DISTINCT r.ReservationID) AS TotalReservations,
+        COUNT(DISTINCT r.UserID) AS UniqueClients,
         SUM(pay.Amount) AS TotalRevenue,
-        AVG(pay.Amount) AS AverageBookingValue
+        AVG(pay.Amount) AS AverageReservationValue
     FROM Payments pay
-    JOIN Bookings b ON pay.BookingID = b.BookingID
-    JOIN Professionals p ON b.ProfessionalID = p.ProfessionalID
-    JOIN ServiceCategories sc ON p.CategoryID = sc.CategoryID
-    WHERE pay.PaymentStatus = 'Completed'
+    JOIN Reservations r ON pay.ReservationID = r.ReservationID
+    JOIN ReservationServices rs ON r.ReservationID = rs.ReservationID
+    JOIN Services s ON rs.ServiceID = s.ServiceID
+    JOIN Categories c ON s.CategoryID = c.CategoryID
+    WHERE pay.PaymentStatus = 'completed'
       AND pay.TransactionDate BETWEEN @StartDate AND @EndDate
-      AND (@CategoryID IS NULL OR sc.CategoryID = @CategoryID)
-    GROUP BY sc.CategoryName
+      AND (@CategoryID IS NULL OR c.CategoryID = @CategoryID)
+    GROUP BY c.CategoryName
     ORDER BY TotalRevenue DESC;
 END;
 GO
@@ -335,9 +364,9 @@ GO
 -- PART 7: Create Triggers
 -- =============================================
 
--- Trigger 1: trg_PreventDoubleBooking (INSERT)
-CREATE TRIGGER trg_PreventDoubleBooking
-ON Bookings
+-- Trigger 1: trg_PreventDoubleReservation (INSERT)
+CREATE TRIGGER trg_PreventDoubleReservation
+ON Reservations
 INSTEAD OF INSERT
 AS
 BEGIN
@@ -346,37 +375,36 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM inserted i
-        JOIN Bookings b ON i.ProfessionalID = b.ProfessionalID
-        JOIN Services s ON i.ServiceID = s.ServiceID
-        WHERE b.Status NOT IN ('Cancelled')
-          AND i.BookingDate < DATEADD(MINUTE,
-              (SELECT DurationMinutes FROM Services WHERE ServiceID = b.ServiceID),
-              b.BookingDate)
-          AND DATEADD(MINUTE, s.DurationMinutes, i.BookingDate) > b.BookingDate
+        JOIN Reservations r ON i.ProfessionalID = r.ProfessionalID
+        WHERE r.Status NOT IN ('cancelled')
+          AND i.ReservationDate = r.ReservationDate
+          AND i.ReservationTime = r.ReservationTime
     )
     BEGIN
-        RAISERROR('Booking conflicts with an existing appointment.', 16, 1);
+        RAISERROR('Reservation conflicts with an existing appointment for this professional.', 16, 1);
         RETURN;
     END
 
-    INSERT INTO Bookings (ClientID, ServiceID, ProfessionalID, BookingDate, Status, Notes, CreatedAt)
-    SELECT ClientID, ServiceID, ProfessionalID, BookingDate, Status, Notes, GETDATE()
+    INSERT INTO Reservations (UserID, ProfessionalID, ReservationDate, ReservationTime, Status, IsPayed, CreatedAt)
+    SELECT UserID, ProfessionalID, ReservationDate, ReservationTime,
+           ISNULL(Status, 'pending'), ISNULL(IsPayed, 0), GETDATE()
     FROM inserted;
 END;
 GO
 
--- Trigger 2: trg_UpdateBookingTimestamp (UPDATE)
-CREATE TRIGGER trg_UpdateBookingTimestamp
-ON Bookings
-AFTER UPDATE
+-- Trigger 2: trg_UpdateReservationPaymentStatus (UPDATE on Payments)
+CREATE TRIGGER trg_UpdateReservationPaymentStatus
+ON Payments
+AFTER INSERT, UPDATE
 AS
 BEGIN
     SET NOCOUNT ON;
 
-    UPDATE Bookings
-    SET UpdatedAt = GETDATE()
-    FROM Bookings b
-    INNER JOIN inserted i ON b.BookingID = i.BookingID;
+    UPDATE Reservations
+    SET IsPayed = 1
+    FROM Reservations r
+    INNER JOIN inserted i ON r.ReservationID = i.ReservationID
+    WHERE i.PaymentStatus = 'completed';
 END;
 GO
 
@@ -390,16 +418,16 @@ BEGIN
 
     IF EXISTS (
         SELECT 1 FROM inserted i
-        JOIN Bookings b ON i.BookingID = b.BookingID
-        WHERE b.Status != 'Completed'
+        JOIN Reservations r ON i.ReservationID = r.ReservationID
+        WHERE r.Status != 'completed'
     )
     BEGIN
-        RAISERROR('Reviews can only be submitted for completed bookings.', 16, 1);
+        RAISERROR('Reviews can only be submitted for completed reservations.', 16, 1);
         RETURN;
     END
 
-    INSERT INTO Reviews (BookingID, Rating, Comment, CreatedAt)
-    SELECT BookingID, Rating, Comment, GETDATE()
+    INSERT INTO Reviews (ReservationID, Rating, Comment, CreatedAt)
+    SELECT ReservationID, Rating, Comment, GETDATE()
     FROM inserted;
 END;
 GO
@@ -418,28 +446,16 @@ GO
 -- Permissions for db_professional_role
 -- =============================================
 
--- Can view and manage their own services
-GRANT SELECT, INSERT, UPDATE ON Services TO db_professional_role;
-
--- Can view and update bookings (for their appointments)
-GRANT SELECT, UPDATE ON Bookings TO db_professional_role;
-
--- Can view their own reviews
-GRANT SELECT ON Reviews TO db_professional_role;
-
--- Can manage their availability
+GRANT SELECT ON Users TO db_professional_role;
+GRANT SELECT, UPDATE ON Professionals TO db_professional_role;
+GRANT SELECT, INSERT, UPDATE ON ProfessionalServices TO db_professional_role;
 GRANT SELECT, INSERT, UPDATE ON Availability TO db_professional_role;
-
--- Can view clients (limited - those who booked with them)
-GRANT SELECT ON Clients TO db_professional_role;
-
--- Can view service categories
-GRANT SELECT ON ServiceCategories TO db_professional_role;
-
--- Can use the professional dashboard view
+GRANT SELECT, UPDATE ON Reservations TO db_professional_role;
+GRANT SELECT ON ReservationServices TO db_professional_role;
+GRANT SELECT ON Services TO db_professional_role;
+GRANT SELECT ON Categories TO db_professional_role;
+GRANT SELECT ON Reviews TO db_professional_role;
 GRANT SELECT ON vw_ProfessionalDashboard TO db_professional_role;
-
--- Can use the earnings function
 GRANT EXECUTE ON fn_GetProfessionalEarnings TO db_professional_role;
 GO
 
@@ -447,64 +463,48 @@ GO
 -- Permissions for db_client_role
 -- =============================================
 
--- Can view public professional information
+GRANT SELECT ON Users TO db_client_role;
 GRANT SELECT ON Professionals TO db_client_role;
-
--- Can view services and categories
 GRANT SELECT ON Services TO db_client_role;
-GRANT SELECT ON ServiceCategories TO db_client_role;
-
--- Can view availability (to check schedules)
+GRANT SELECT ON Categories TO db_client_role;
 GRANT SELECT ON Availability TO db_client_role;
-
--- Can view and create their own bookings
-GRANT SELECT, INSERT ON Bookings TO db_client_role;
-GRANT UPDATE ON Bookings TO db_client_role;
-
--- Can view and create reviews (for their completed bookings)
+GRANT SELECT ON ProfessionalServices TO db_client_role;
+GRANT SELECT, INSERT ON Reservations TO db_client_role;
+GRANT UPDATE ON Reservations TO db_client_role;
+GRANT SELECT, INSERT ON ReservationServices TO db_client_role;
 GRANT SELECT, INSERT ON Reviews TO db_client_role;
-
--- Can view their own payments
 GRANT SELECT ON Payments TO db_client_role;
-
--- Can use the service catalog view
 GRANT SELECT ON vw_ServiceCatalog TO db_client_role;
-
--- Can use the booking count function
-GRANT EXECUTE ON fn_GetClientBookingCount TO db_client_role;
+GRANT EXECUTE ON fn_GetUserReservationCount TO db_client_role;
 GO
 
 -- =============================================
 -- Permissions for db_admin_role
 -- =============================================
 
--- Full access to all tables
-GRANT SELECT, INSERT, UPDATE, DELETE ON ServiceCategories TO db_admin_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON Users TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Professionals TO db_admin_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON Clients TO db_admin_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON Categories TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Services TO db_admin_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ProfessionalServices TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Availability TO db_admin_role;
-GRANT SELECT, INSERT, UPDATE, DELETE ON Bookings TO db_admin_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON Reservations TO db_admin_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ReservationServices TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Reviews TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Payments TO db_admin_role;
 
--- Access to all views
 GRANT SELECT ON vw_ProfessionalDashboard TO db_admin_role;
 GRANT SELECT ON vw_ServiceCatalog TO db_admin_role;
 
--- Access to all functions and procedures
 GRANT EXECUTE ON fn_GetProfessionalEarnings TO db_admin_role;
-GRANT EXECUTE ON fn_GetClientBookingCount TO db_admin_role;
-GRANT EXECUTE ON sp_GetBookingsByDateRange TO db_admin_role;
+GRANT EXECUTE ON fn_GetUserReservationCount TO db_admin_role;
+GRANT EXECUTE ON sp_GetReservationsByDateRange TO db_admin_role;
 GRANT EXECUTE ON sp_GetRevenueReport TO db_admin_role;
 GO
 
 -- =============================================
 -- PART 9: Create Sample Users (Optional)
 -- =============================================
-
--- Note: Uncomment and modify these as needed for your environment
--- These create SQL Server logins and map them to database users
 
 /*
 -- Create logins at server level
