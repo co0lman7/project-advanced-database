@@ -42,6 +42,19 @@ EXEC sp_bindrule 'rule_PhoneNumber', 'PhoneNumber';
 GO
 
 -- =============================================
+-- PART 1.5: Create Partition Function and Scheme
+-- =============================================
+
+-- Partition by ReservationDate (yearly ranges)
+CREATE PARTITION FUNCTION pf_ReservationDate (DATE)
+AS RANGE RIGHT FOR VALUES ('2024-01-01', '2025-01-01', '2026-01-01', '2027-01-01');
+GO
+
+CREATE PARTITION SCHEME ps_ReservationDate
+AS PARTITION pf_ReservationDate ALL TO ([PRIMARY]);
+GO
+
+-- =============================================
 -- PART 2: Create Tables
 -- =============================================
 
@@ -125,9 +138,9 @@ CREATE TABLE ProfessionalServices (
 );
 GO
 
--- 7. Reservations Table (replaces Bookings)
+-- 7. Reservations Table (partitioned by ReservationDate)
 CREATE TABLE Reservations (
-    ReservationID INT PRIMARY KEY IDENTITY(1,1),
+    ReservationID INT IDENTITY(1,1),
     UserID INT NOT NULL,
     ProfessionalID INT NOT NULL,
     ReservationDate DATE NOT NULL,
@@ -135,11 +148,16 @@ CREATE TABLE Reservations (
     Status NVARCHAR(20) DEFAULT 'pending' CHECK (Status IN ('pending', 'confirmed', 'completed', 'cancelled')),
     IsPayed BIT DEFAULT 0,
     CreatedAt DATETIME DEFAULT GETDATE(),
+    CONSTRAINT PK_Reservations PRIMARY KEY (ReservationID, ReservationDate),
     CONSTRAINT FK_Reservation_User FOREIGN KEY (UserID)
         REFERENCES Users(UserID),
     CONSTRAINT FK_Reservation_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
-);
+) ON ps_ReservationDate(ReservationDate);
+GO
+
+-- Unique index on ReservationID to support foreign keys from child tables
+CREATE UNIQUE NONCLUSTERED INDEX UX_Reservations_ReservationID ON Reservations(ReservationID);
 GO
 
 -- 8. ReservationServices Junction Table (M:N - Reservation includes Service)
@@ -183,18 +201,6 @@ CREATE TABLE Reviews (
 );
 GO
 
--- 11. UserLoyaltyBenefits Table (multivalue attribute - benefits per user)
-CREATE TABLE UserLoyaltyBenefits (
-    BenefitID INT PRIMARY KEY IDENTITY(1,1),
-    UserID INT NOT NULL,
-    BenefitName NVARCHAR(100) NOT NULL,
-    BenefitDescription NVARCHAR(500) NULL,
-    GrantedAt DATETIME DEFAULT GETDATE(),
-    CONSTRAINT FK_ULB_User FOREIGN KEY (UserID)
-        REFERENCES Users(UserID)
-        ON DELETE CASCADE
-);
-GO
 
 -- =============================================
 -- PART 3: Create Indexes for Performance
@@ -226,9 +232,6 @@ GO
 CREATE NONCLUSTERED INDEX IX_Reviews_ReservationID ON Reviews(ReservationID);
 GO
 
--- UserLoyaltyBenefits indexes
-CREATE NONCLUSTERED INDEX IX_ULB_UserID ON UserLoyaltyBenefits(UserID);
-GO
 
 -- =============================================
 -- PART 4: Create Views
@@ -283,12 +286,7 @@ SELECT
     u.UserID,
     u.FirstName + ' ' + u.LastName AS ClientName,
     u.LoyaltyTier,
-    COUNT(DISTINCT r.ReservationID) AS CompletedReservations,
-    (
-        SELECT STRING_AGG(ulb.BenefitName, ', ')
-        FROM UserLoyaltyBenefits ulb
-        WHERE ulb.UserID = u.UserID
-    ) AS ActiveBenefits
+    COUNT(DISTINCT r.ReservationID) AS CompletedReservations
 FROM Users u
 LEFT JOIN Reservations r ON u.UserID = r.UserID AND r.Status = 'completed'
 WHERE u.Role = 'client'
@@ -571,7 +569,6 @@ GRANT SELECT ON vw_ServiceCatalog TO db_client_role;
 GRANT SELECT ON vw_ClientLoyaltyOverview TO db_client_role;
 GRANT EXECUTE ON fn_GetUserReservationCount TO db_client_role;
 GRANT EXECUTE ON fn_GetUserLoyaltyTier TO db_client_role;
-GRANT SELECT ON UserLoyaltyBenefits TO db_client_role;
 GO
 
 -- =============================================
@@ -588,8 +585,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON Reservations TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ReservationServices TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Reviews TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Payments TO db_admin_role;
-
-GRANT SELECT, INSERT, UPDATE, DELETE ON UserLoyaltyBenefits TO db_admin_role;
 
 GRANT SELECT ON vw_ProfessionalDashboard TO db_admin_role;
 GRANT SELECT ON vw_ServiceCatalog TO db_admin_role;
