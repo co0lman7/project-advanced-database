@@ -160,7 +160,7 @@ CREATE TABLE Reservations (
         ON UPDATE CASCADE,
     CONSTRAINT FK_Reservation_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
-        ON UPDATE CASCADE
+        ON UPDATE NO ACTION
 ) ON ps_ReservationDate(ReservationDate);
 GO
 
