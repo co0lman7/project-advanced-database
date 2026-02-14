@@ -1,0 +1,9 @@
+category_id,category_name,description,is_active
+1,Plumbing,Pipe repair water heater installation and drain cleaning,1
+2,Electrical,Wiring installation lighting repair and panel upgrades,1
+3,Cleaning,House cleaning office cleaning and deep sanitization,1
+4,Painting & Renovation,Interior and exterior painting and home renovation,1
+5,HVAC,Heating ventilation and air conditioning services,1
+6,Locksmith,Lock installation key duplication and emergency lockout,1
+7,Appliance Repair,Washing machine refrigerator and oven repair,1
+8,Moving & Transport,Furniture moving packing and local transport,1

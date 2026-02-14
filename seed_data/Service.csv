@@ -1,0 +1,26 @@
+service_id,service_name,description,base_price,is_active,category_id
+1,Pipe Repair,Fix leaking or burst pipes in residential properties,40.00,1,1
+2,Drain Cleaning,Unclog and clean kitchen and bathroom drains,35.00,1,1
+3,Water Heater Installation,Install or replace electric and gas water heaters,120.00,1,1
+4,Electrical Wiring,New wiring installation for homes and offices,80.00,1,2
+5,Lighting Installation,Install ceiling lights chandeliers and outdoor lighting,45.00,1,2
+6,Electrical Panel Upgrade,Upgrade fuse box or circuit breaker panel,150.00,1,2
+7,House Cleaning,Full house cleaning including kitchen and bathrooms,30.00,1,3
+8,Office Cleaning,Professional cleaning for offices and commercial spaces,50.00,1,3
+9,Deep Sanitization,Thorough disinfection and deep cleaning service,70.00,1,3
+10,Interior Painting,Paint walls ceilings and trim for rooms and apartments,60.00,1,4
+11,Exterior Painting,Paint exterior walls fences and balconies,85.00,1,4
+12,Bathroom Renovation,Complete bathroom remodeling and tile work,200.00,1,4
+13,AC Installation,Install split or central air conditioning units,140.00,1,5
+14,Heating System Repair,Repair boilers radiators and central heating systems,90.00,1,5
+15,AC Maintenance,Regular AC filter cleaning and performance check,40.00,1,5
+16,Lock Replacement,Replace door locks for homes and businesses,25.00,1,6
+17,Emergency Lockout,24/7 emergency lockout assistance,50.00,1,6
+18,Key Duplication,Duplicate standard and security keys,10.00,1,6
+19,Washing Machine Repair,Diagnose and fix washing machine issues,55.00,1,7
+20,Refrigerator Repair,Fix cooling leaks and compressor problems,65.00,1,7
+21,Oven & Stove Repair,Repair electric and gas ovens and stoves,50.00,1,7
+22,Local Moving,Move furniture and belongings within the city,80.00,1,8
+23,Furniture Assembly,Assemble flat-pack furniture and office desks,35.00,1,8
+24,Packing Service,Professional packing of belongings for moving,45.00,1,8
+25,Long Distance Moving,Move belongings between cities in Kosovo,180.00,1,8

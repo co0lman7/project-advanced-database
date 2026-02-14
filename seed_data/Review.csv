@@ -1,0 +1,26 @@
+review_id,rating,comment,created_at,reservation_id
+1,5,Fixed the leaking pipe in under an hour. Excellent work,2025-02-11 10:00:00,1
+2,4,Rewired the living room quickly and cleanly,2025-02-13 11:00:00,2
+3,5,House was spotless after the cleaning. Very thorough,2025-02-16 09:00:00,3
+4,4,Great interior painting. Colors look amazing,2025-02-21 14:00:00,4
+5,5,AC installed perfectly and works great. Very professional,2025-03-02 08:00:00,5
+6,4,Got locked out at night and he came within 20 minutes,2025-03-06 10:00:00,6
+7,3,Washing machine fixed but took longer than expected,2025-03-11 09:00:00,7
+8,5,Moving team was fast and careful with furniture,2025-03-16 11:00:00,8
+9,4,Drain is flowing perfectly now. Good job,2025-03-21 09:00:00,9
+10,5,Smart lighting installed in the whole apartment. Love it,2025-03-26 10:00:00,10
+11,5,Deep sanitization was very thorough. Office smells fresh,2025-04-02 08:00:00,11
+12,4,Bathroom renovation turned out beautiful. Minor delay on tiles,2025-04-06 10:00:00,12
+13,5,Heating system repaired same day. Very knowledgeable,2025-04-11 14:00:00,13
+14,4,Refrigerator cooling again. Fair price for the repair,2025-04-16 11:00:00,14
+15,5,Assembled all IKEA furniture perfectly. Very efficient,2025-04-21 09:00:00,15
+16,5,Second time using this plumber. Always reliable,2025-05-02 10:00:00,16
+17,4,Electrical panel upgraded smoothly. Clean work,2025-05-06 08:00:00,17
+18,4,Office cleaned to a high standard. Will book again,2025-05-11 14:00:00,18
+19,5,Lock replaced quickly. Feels much more secure now,2025-05-16 08:00:00,19
+20,5,Third move with this team. Always careful and fast,2025-05-21 10:00:00,20
+21,4,Water heater installed and working perfectly,2025-06-02 10:00:00,21
+22,5,Panel upgrade done professionally with new breakers,2025-06-06 11:00:00,22
+23,4,Office deep cleaned before our opening. Looked great,2025-06-11 09:00:00,23
+24,5,Exterior painting transformed the look of our house,2025-06-16 09:00:00,24
+25,4,AC maintenance done quickly. Running much cooler now,2025-06-21 10:00:00,25
