@@ -64,6 +64,7 @@ CREATE TABLE Users (
     FirstName NVARCHAR(50) NOT NULL,
     LastName NVARCHAR(50) NOT NULL,
     Email NVARCHAR(100) UNIQUE NOT NULL,
+    Phone PhoneNumber,
     PasswordHash NVARCHAR(255) NOT NULL,
     Role NVARCHAR(20) NOT NULL CHECK (Role IN ('client', 'professional', 'admin')),
     LoyaltyTier NVARCHAR(20) DEFAULT 'Bronze' CHECK (LoyaltyTier IN ('Bronze', 'Silver', 'Gold', 'Platinum')),
@@ -82,6 +83,7 @@ CREATE TABLE Professionals (
     CONSTRAINT FK_Professional_User FOREIGN KEY (ProfessionalID)
         REFERENCES Users(UserID)
         ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 GO
 
@@ -95,7 +97,8 @@ CREATE TABLE Availability (
     Status NVARCHAR(20) DEFAULT 'available' CHECK (Status IN ('available', 'unavailable', 'booked')),
     CONSTRAINT FK_Availability_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
-        ON DELETE CASCADE,
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
     CONSTRAINT CHK_Availability_TimeRange CHECK (EndTime > StartTime)
 );
 GO
@@ -120,6 +123,7 @@ CREATE TABLE Services (
     CONSTRAINT FK_Service_Category FOREIGN KEY (CategoryID)
         REFERENCES Categories(CategoryID)
         ON DELETE NO ACTION
+        ON UPDATE CASCADE
 );
 GO
 
@@ -131,10 +135,12 @@ CREATE TABLE ProfessionalServices (
     PRIMARY KEY (ProfessionalID, ServiceID),
     CONSTRAINT FK_PS_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
-        ON DELETE CASCADE,
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
     CONSTRAINT FK_PS_Service FOREIGN KEY (ServiceID)
         REFERENCES Services(ServiceID)
         ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 GO
 
@@ -150,9 +156,11 @@ CREATE TABLE Reservations (
     CreatedAt DATETIME DEFAULT GETDATE(),
     CONSTRAINT PK_Reservations PRIMARY KEY (ReservationID, ReservationDate),
     CONSTRAINT FK_Reservation_User FOREIGN KEY (UserID)
-        REFERENCES Users(UserID),
+        REFERENCES Users(UserID)
+        ON UPDATE CASCADE,
     CONSTRAINT FK_Reservation_Professional FOREIGN KEY (ProfessionalID)
         REFERENCES Professionals(ProfessionalID)
+        ON UPDATE CASCADE
 ) ON ps_ReservationDate(ReservationDate);
 GO
 
@@ -167,10 +175,12 @@ CREATE TABLE ReservationServices (
     PRIMARY KEY (ReservationID, ServiceID),
     CONSTRAINT FK_RS_Reservation FOREIGN KEY (ReservationID)
         REFERENCES Reservations(ReservationID)
-        ON DELETE CASCADE,
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
     CONSTRAINT FK_RS_Service FOREIGN KEY (ServiceID)
         REFERENCES Services(ServiceID)
         ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 GO
 
@@ -185,6 +195,7 @@ CREATE TABLE Payments (
     CONSTRAINT FK_Payment_Reservation FOREIGN KEY (ReservationID)
         REFERENCES Reservations(ReservationID)
         ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 GO
 
@@ -198,9 +209,25 @@ CREATE TABLE Reviews (
     CONSTRAINT FK_Review_Reservation FOREIGN KEY (ReservationID)
         REFERENCES Reservations(ReservationID)
         ON DELETE CASCADE
+        ON UPDATE CASCADE
 );
 GO
 
+
+-- 11. ReservationAuditLog Table (for tracking deleted reservations)
+CREATE TABLE ReservationAuditLog (
+    LogID INT PRIMARY KEY IDENTITY(1,1),
+    ReservationID INT NOT NULL,
+    UserID INT NOT NULL,
+    ProfessionalID INT NOT NULL,
+    ReservationDate DATE NOT NULL,
+    ReservationTime TIME NOT NULL,
+    Status NVARCHAR(20),
+    IsPayed BIT,
+    DeletedAt DATETIME DEFAULT GETDATE(),
+    DeletedBy NVARCHAR(128) DEFAULT SUSER_SNAME()
+);
+GO
 
 -- =============================================
 -- PART 3: Create Indexes for Performance
@@ -291,6 +318,26 @@ FROM Users u
 LEFT JOIN Reservations r ON u.UserID = r.UserID AND r.Status = 'completed'
 WHERE u.Role = 'client'
 GROUP BY u.UserID, u.FirstName, u.LastName, u.LoyaltyTier;
+GO
+
+-- View 4: vw_AdminSystemOverview (admin report)
+CREATE VIEW vw_AdminSystemOverview AS
+SELECT
+    (SELECT COUNT(*) FROM Users) AS TotalUsers,
+    (SELECT COUNT(*) FROM Users WHERE Role = 'client') AS TotalClients,
+    (SELECT COUNT(*) FROM Users WHERE Role = 'professional') AS TotalProfessionals,
+    (SELECT COUNT(*) FROM Reservations WHERE Status = 'pending') AS PendingReservations,
+    (SELECT COUNT(*) FROM Reservations WHERE Status = 'confirmed') AS ConfirmedReservations,
+    (SELECT COUNT(*) FROM Reservations WHERE Status = 'completed') AS CompletedReservations,
+    (SELECT COUNT(*) FROM Reservations WHERE Status = 'cancelled') AS CancelledReservations,
+    (SELECT ISNULL(SUM(Amount), 0) FROM Payments WHERE PaymentStatus = 'completed') AS TotalRevenue,
+    (SELECT AVG(CAST(Rating AS DECIMAL(3,2))) FROM Reviews) AS OverallAverageRating,
+    (SELECT TOP 1 c.CategoryName
+     FROM ReservationServices rs
+     JOIN Services s ON rs.ServiceID = s.ServiceID
+     JOIN Categories c ON s.CategoryID = c.CategoryID
+     GROUP BY c.CategoryName
+     ORDER BY COUNT(*) DESC) AS MostPopularCategory;
 GO
 
 -- =============================================
@@ -451,18 +498,58 @@ BEGIN
 END;
 GO
 
--- =============================================
--- PART 7: Create Triggers
--- =============================================
-
--- Trigger 1: trg_PreventDoubleReservation (INSERT)
-CREATE TRIGGER trg_PreventDoubleReservation
-ON Reservations
-INSTEAD OF INSERT
+-- Stored Procedure 4: sp_SafeSearchUsers (SQL Injection Prevention)
+-- Uses sp_executesql with parameterized queries to prevent SQL injection
+-- All user input is passed as typed parameters, never concatenated into SQL strings
+CREATE PROCEDURE sp_SafeSearchUsers
+    @SearchName NVARCHAR(100) = NULL,
+    @SearchEmail NVARCHAR(100) = NULL,
+    @SearchRole NVARCHAR(20) = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
+    DECLARE @SQL NVARCHAR(MAX);
+    DECLARE @Params NVARCHAR(MAX);
+
+    SET @SQL = N'SELECT UserID, FirstName, LastName, Email, Phone, Role, LoyaltyTier, IsActive, CreatedAt
+                 FROM Users WHERE 1=1';
+
+    -- Build dynamic SQL safely using parameters (never string concatenation)
+    IF @SearchName IS NOT NULL
+        SET @SQL = @SQL + N' AND (FirstName LIKE @Name OR LastName LIKE @Name)';
+
+    IF @SearchEmail IS NOT NULL
+        SET @SQL = @SQL + N' AND Email LIKE @Email';
+
+    IF @SearchRole IS NOT NULL
+        SET @SQL = @SQL + N' AND Role = @Role';
+
+    SET @SQL = @SQL + N' ORDER BY LastName, FirstName';
+
+    -- All values passed as typed parameters to sp_executesql — immune to SQL injection
+    SET @Params = N'@Name NVARCHAR(100), @Email NVARCHAR(100), @Role NVARCHAR(20)';
+
+    EXEC sp_executesql @SQL, @Params,
+        @Name = @SearchName,
+        @Email = @SearchEmail,
+        @Role = @SearchRole;
+END;
+GO
+
+-- =============================================
+-- PART 7: Create Triggers
+-- =============================================
+
+-- Trigger 1: trg_PreventDoubleReservation (INSERT, UPDATE)
+CREATE TRIGGER trg_PreventDoubleReservation
+ON Reservations
+INSTEAD OF INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    -- Check for scheduling conflicts (exclude the row being updated itself)
     IF EXISTS (
         SELECT 1
         FROM inserted i
@@ -470,16 +557,35 @@ BEGIN
         WHERE r.Status NOT IN ('cancelled')
           AND i.ReservationDate = r.ReservationDate
           AND i.ReservationTime = r.ReservationTime
+          AND r.ReservationID != i.ReservationID
     )
     BEGIN
         RAISERROR('Reservation conflicts with an existing appointment for this professional.', 16, 1);
         RETURN;
     END
 
-    INSERT INTO Reservations (UserID, ProfessionalID, ReservationDate, ReservationTime, Status, IsPayed, CreatedAt)
-    SELECT UserID, ProfessionalID, ReservationDate, ReservationTime,
-           ISNULL(Status, 'pending'), ISNULL(IsPayed, 0), GETDATE()
-    FROM inserted;
+    -- Handle INSERT (no matching row in deleted pseudo-table)
+    IF NOT EXISTS (SELECT 1 FROM deleted)
+    BEGIN
+        INSERT INTO Reservations (UserID, ProfessionalID, ReservationDate, ReservationTime, Status, IsPayed, CreatedAt)
+        SELECT UserID, ProfessionalID, ReservationDate, ReservationTime,
+               ISNULL(Status, 'pending'), ISNULL(IsPayed, 0), GETDATE()
+        FROM inserted;
+    END
+    ELSE
+    -- Handle UPDATE
+    BEGIN
+        UPDATE r
+        SET r.UserID = i.UserID,
+            r.ProfessionalID = i.ProfessionalID,
+            r.ReservationDate = i.ReservationDate,
+            r.ReservationTime = i.ReservationTime,
+            r.Status = i.Status,
+            r.IsPayed = i.IsPayed
+        FROM Reservations r
+        INNER JOIN inserted i ON r.ReservationID = i.ReservationID
+            AND r.ReservationDate = (SELECT d.ReservationDate FROM deleted d WHERE d.ReservationID = i.ReservationID);
+    END
 END;
 GO
 
@@ -520,6 +626,40 @@ BEGIN
     INSERT INTO Reviews (ReservationID, Rating, Comment, CreatedAt)
     SELECT ReservationID, Rating, Comment, GETDATE()
     FROM inserted;
+END;
+GO
+
+-- Trigger 4: trg_LogReservationDeletion (DELETE)
+CREATE TRIGGER trg_LogReservationDeletion
+ON Reservations
+AFTER DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    INSERT INTO ReservationAuditLog (ReservationID, UserID, ProfessionalID, ReservationDate, ReservationTime, Status, IsPayed)
+    SELECT ReservationID, UserID, ProfessionalID, ReservationDate, ReservationTime, Status, IsPayed
+    FROM deleted;
+END;
+GO
+
+-- Trigger 5: trg_PreventCompletedReservationEdit (UPDATE)
+CREATE TRIGGER trg_PreventCompletedReservationEdit
+ON Reservations
+AFTER UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1 FROM deleted d
+        WHERE d.Status = 'completed'
+    )
+    BEGIN
+        RAISERROR('Completed reservations cannot be modified.', 16, 1);
+        ROLLBACK TRANSACTION;
+        RETURN;
+    END
 END;
 GO
 
@@ -586,9 +726,12 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON ReservationServices TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Reviews TO db_admin_role;
 GRANT SELECT, INSERT, UPDATE, DELETE ON Payments TO db_admin_role;
 
+GRANT SELECT, INSERT, UPDATE, DELETE ON ReservationAuditLog TO db_admin_role;
+
 GRANT SELECT ON vw_ProfessionalDashboard TO db_admin_role;
 GRANT SELECT ON vw_ServiceCatalog TO db_admin_role;
 GRANT SELECT ON vw_ClientLoyaltyOverview TO db_admin_role;
+GRANT SELECT ON vw_AdminSystemOverview TO db_admin_role;
 
 GRANT EXECUTE ON fn_GetProfessionalEarnings TO db_admin_role;
 GRANT EXECUTE ON fn_GetUserReservationCount TO db_admin_role;
@@ -596,6 +739,7 @@ GRANT EXECUTE ON fn_GetUserLoyaltyTier TO db_admin_role;
 GRANT EXECUTE ON sp_GetReservationsByDateRange TO db_admin_role;
 GRANT EXECUTE ON sp_GetRevenueReport TO db_admin_role;
 GRANT EXECUTE ON sp_GetServiceFrequencyAnalysis TO db_admin_role;
+GRANT EXECUTE ON sp_SafeSearchUsers TO db_admin_role;
 GO
 
 -- =============================================
