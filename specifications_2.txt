@@ -1,3 +1,0 @@
-1. Availability can be an attribute to Professional
-2. Users can be categorized into different roles (professional, admin, guest, superadmin)
-3. Service/ServiceCategories can be checked to lower redundancy 1nf/2nf/3nf
